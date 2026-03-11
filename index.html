@@ -2,7 +2,10 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, user-scalable=no"
+    />
     <title>NEON JUMP</title>
     <link
       href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Rajdhani:wght@400;500;600;700&display=swap"
@@ -33,9 +36,12 @@
         font-family: "Rajdhani", sans-serif;
         cursor: none;
         user-select: none;
+        touch-action: none;
+        -webkit-tap-highlight-color: transparent;
       }
       canvas {
         display: block;
+        touch-action: none;
       }
       .screen {
         position: fixed;
@@ -1032,7 +1038,6 @@
     </style>
   </head>
   <body>
-    <!-- GAME STRUCTURE -->
     <!-- Custom cursor -->
     <div id="cur"></div>
     <!-- BG particle canvas -->
@@ -1535,8 +1540,6 @@
           bgCtx.rotate(r.rot);
           bgCtx.strokeStyle = `rgba(${r.hue.join(",")},${a})`;
           bgCtx.lineWidth = 1;
-          bgCtx.shadowColor = `rgba(${r.hue.join(",")},${a * 2})`;
-          bgCtx.shadowBlur = 10;
           bgCtx.strokeRect(-r.w / 2, -r.h / 2, r.w, r.h);
           bgCtx.restore();
           if (r.life <= 0 || r.y < -200) {
@@ -2073,60 +2076,90 @@
       }
 
       // ─── DRAW HELPERS ───
+      // ─── GLOW HELPER: fake glow with layered alpha rects/circles (NO shadowBlur) ───
+      function glowRect(x, y, w, h, col, layers = 2) {
+        gc.fillStyle = col;
+        for (let i = layers; i > 0; i--) {
+          gc.globalAlpha = 0.07 / i;
+          gc.fillRect(x - i * 4, y - i * 4, w + i * 8, h + i * 8);
+        }
+        gc.globalAlpha = 1;
+      }
+      function glowCircle(cx, cy, r, col) {
+        gc.fillStyle = col;
+        gc.globalAlpha = 0.12;
+        gc.beginPath();
+        gc.arc(cx, cy, r + 6, 0, Math.PI * 2);
+        gc.fill();
+        gc.globalAlpha = 0.06;
+        gc.beginPath();
+        gc.arc(cx, cy, r + 12, 0, Math.PI * 2);
+        gc.fill();
+        gc.globalAlpha = 1;
+      }
+
       function drawSpike(x, y, h) {
-        gc.save();
+        // Glow layer first
+        gc.globalAlpha = 0.2;
+        gc.fillStyle = "#ff00ff";
+        gc.beginPath();
+        gc.moveTo(x - 26, y);
+        gc.lineTo(x + 26, y);
+        gc.lineTo(x, y - h - 8);
+        gc.closePath();
+        gc.fill();
+        gc.globalAlpha = 0.1;
+        gc.beginPath();
+        gc.moveTo(x - 32, y);
+        gc.lineTo(x + 32, y);
+        gc.lineTo(x, y - h - 14);
+        gc.closePath();
+        gc.fill();
+        gc.globalAlpha = 1;
+        // Solid spike
+        gc.fillStyle = "#ff00ff";
         gc.beginPath();
         gc.moveTo(x - 20, y);
         gc.lineTo(x + 20, y);
         gc.lineTo(x, y - h);
         gc.closePath();
-        gc.fillStyle = "#ff00ff";
-        gc.shadowColor = "#ff00ff";
-        gc.shadowBlur = 14;
         gc.fill();
-        gc.restore();
       }
       function drawPlatform(x, y, w, h) {
-        gc.save();
         gc.fillStyle = "rgba(13,20,50,0.9)";
         gc.fillRect(x, y, w, h);
-        gc.strokeStyle = "#00f2ff";
-        gc.lineWidth = 2;
-        gc.shadowColor = "#00f2ff";
-        gc.shadowBlur = 10;
+        // Cheap top-edge glow
+        gc.fillStyle = "rgba(0,242,255,0.6)";
+        gc.fillRect(x, y, w, 2);
+        gc.fillStyle = "rgba(0,242,255,0.15)";
+        gc.fillRect(x - 2, y - 3, w + 4, 5);
+        gc.strokeStyle = "rgba(0,242,255,0.4)";
+        gc.lineWidth = 1;
         gc.strokeRect(x, y, w, h);
-        gc.restore();
       }
       function drawPlayer() {
         const x = P.x,
           y = P.y,
           sz = P.sz;
-        // Trail effect
         const trail = shopData.activeTrail;
+        // Trail ghost rects — no shadowBlur, just alpha fade
         P.trail.forEach((t, i) => {
-          gc.save();
-          gc.globalAlpha = t.a * (1 - i / P.trail.length) * 0.55;
-          let trailColor = "#00f2ff";
-          if (trail === "base") trailColor = shopData.baseColor;
-          if (trail === "dark")
-            trailColor = `hsl(${340 + i * 3},90%,${25 + i * 2}%)`;
+          const alpha = (1 - i / P.trail.length) * 0.45;
+          gc.globalAlpha = alpha;
+          let tc = "#00f2ff";
+          if (trail === "base") tc = shopData.baseColor;
+          if (trail === "dark") tc = `hsl(${340 + i * 3},90%,${25 + i * 2}%)`;
           if (trail === "rainbow")
-            trailColor = `hsl(${(rainbowHue + i * 15) % 360},100%,60%)`;
-          if (trail === "lightning")
-            trailColor = `hsl(${55},100%,${80 - i * 4}%)`;
-          if (trail === "star")
-            trailColor = i % 2 === 0 ? "#ffd700" : "#00f2ff";
-          gc.fillStyle = trailColor;
-          gc.shadowColor = trailColor;
-          gc.shadowBlur = 12;
-          gc.fillRect(t.x, t.y + i * 1.5, sz - i * 3, sz - i * 3);
-          gc.restore();
+            tc = `hsl(${(rainbowHue + i * 15) % 360},100%,60%)`;
+          if (trail === "lightning") tc = `hsl(55,100%,${80 - i * 4}%)`;
+          if (trail === "star") tc = i % 2 === 0 ? "#ffd700" : "#00f2ff";
+          gc.fillStyle = tc;
+          const ts = sz - i * 3;
+          gc.fillRect(t.x, t.y + i * 1.5, ts, ts);
         });
+        gc.globalAlpha = 1;
 
-        gc.save();
-        gc.translate(x + sz / 2, y + sz / 2);
-        gc.rotate(P.rot);
-        // Player color based on trail
+        // Outer glow via layered rects
         let bodyCol = "#00f2ff",
           innerCol = "#0d59f2";
         if (trail === "base") {
@@ -2149,8 +2182,14 @@
           bodyCol = "#ffd700";
           innerCol = "#003366";
         }
-        gc.shadowColor = bodyCol;
-        gc.shadowBlur = 24;
+
+        gc.save();
+        gc.translate(x + sz / 2, y + sz / 2);
+        gc.rotate(P.rot);
+        // Glow halos
+        glowRect(-sz / 2, -sz / 2, sz, sz, bodyCol, 3);
+        // Body
+        gc.globalAlpha = 1;
         gc.fillStyle = bodyCol;
         gc.fillRect(-sz / 2, -sz / 2, sz, sz);
         gc.fillStyle = innerCol;
@@ -2170,49 +2209,49 @@
         if (c.collected) return;
         c.anim += 0.06;
         const bob = Math.sin(c.anim) * 4;
-        gc.save();
-        gc.translate(sx, c.y + bob);
-        gc.beginPath();
-        gc.arc(0, 0, 10, 0, Math.PI * 2);
+        const cy = c.y + bob;
+        // Glow ring
+        glowCircle(sx, cy, 10, "#ffd700");
+        gc.globalAlpha = 1;
         gc.fillStyle = "#ffd700";
-        gc.shadowColor = "#ffd700";
-        gc.shadowBlur = 16;
+        gc.beginPath();
+        gc.arc(sx, cy, 10, 0, Math.PI * 2);
         gc.fill();
         gc.fillStyle = "#ffaa00";
         gc.font = "bold 11px Orbitron,monospace";
         gc.textAlign = "center";
         gc.textBaseline = "middle";
-        gc.fillText("$", 0, 1);
-        gc.restore();
+        gc.fillText("$", sx, cy + 1);
       }
 
+      // Pre-bake static bg gradient once
+      let bgGrad = null;
+      let bgGradH = 0;
       function drawGameBg() {
-        // Sky gradient
-        const grad = gc.createLinearGradient(0, 0, 0, H);
-        grad.addColorStop(0, "#020510");
-        grad.addColorStop(1, "#060a12");
-        gc.fillStyle = grad;
+        if (!bgGrad || bgGradH !== H) {
+          bgGrad = gc.createLinearGradient(0, 0, 0, H);
+          bgGrad.addColorStop(0, "#020510");
+          bgGrad.addColorStop(1, "#060a12");
+          bgGradH = H;
+        }
+        gc.fillStyle = bgGrad;
         gc.fillRect(0, 0, W, H);
-        // Grid
-        gc.save();
+        // Grid — batch all lines in one path
+        gc.beginPath();
         gc.strokeStyle = "rgba(13,89,242,0.07)";
         gc.lineWidth = 1;
         const gs = 50,
           ox = bgScrollX % gs;
-        for (let x = -ox; x < W; x += gs) {
-          gc.beginPath();
-          gc.moveTo(x, 0);
-          gc.lineTo(x, H);
-          gc.stroke();
+        for (let gx = -ox; gx < W; gx += gs) {
+          gc.moveTo(gx, 0);
+          gc.lineTo(gx, H);
         }
-        for (let y = 0; y < H; y += gs) {
-          gc.beginPath();
-          gc.moveTo(0, y);
-          gc.lineTo(W, y);
-          gc.stroke();
+        for (let gy = 0; gy < H; gy += gs) {
+          gc.moveTo(0, gy);
+          gc.lineTo(W, gy);
         }
-        gc.restore();
-        // Mountains (parallax)
+        gc.stroke();
+        // Mountains — no shadowBlur, just alpha triangles
         drawMtn(
           ((-bgScrollX * 0.12) % (W + 600)) - 300,
           FLOOR_Y * 0.8,
@@ -2239,18 +2278,15 @@
         );
       }
       function drawMtn(cx, by, w, h, c, a) {
-        gc.save();
         gc.globalAlpha = a;
+        gc.fillStyle = c;
         gc.beginPath();
         gc.moveTo(cx - w / 2, by);
         gc.lineTo(cx, by - h);
         gc.lineTo(cx + w / 2, by);
         gc.closePath();
-        gc.fillStyle = c;
-        gc.shadowColor = c;
-        gc.shadowBlur = 20;
         gc.fill();
-        gc.restore();
+        gc.globalAlpha = 1;
       }
 
       // ─── TRAIL PARTICLES ───
@@ -2276,34 +2312,28 @@
             trailParticles.splice(i, 1);
             continue;
           }
-          gc.save();
           gc.globalAlpha = p.life;
           gc.fillStyle = p.color;
-          if (p.glow) {
-            gc.shadowColor = p.color;
-            gc.shadowBlur = 12;
-          }
           if (p.square) {
+            gc.save();
             gc.translate(p.x, p.y);
             gc.rotate(p.rot || 0);
             if (p.rs) p.rot += p.rs;
             gc.fillRect(-p.r, -p.r, p.r * 2, p.r * 2);
+            gc.restore();
           } else {
             gc.beginPath();
             gc.arc(p.x, p.y, p.r, 0, Math.PI * 2);
             gc.fill();
           }
-          gc.restore();
         }
+        gc.globalAlpha = 1;
       }
 
       // ─── LIGHTNING BOLTS ───
       function drawLightning(from, to) {
-        gc.save();
-        gc.strokeStyle = "rgba(255,230,50,0.6)";
-        gc.lineWidth = 1.5;
-        gc.shadowColor = "#ffe066";
-        gc.shadowBlur = 8;
+        gc.strokeStyle = "rgba(255,230,50,0.7)";
+        gc.lineWidth = 2;
         gc.beginPath();
         gc.moveTo(from.x, from.y);
         const steps = 6,
@@ -2316,7 +2346,10 @@
           );
         }
         gc.stroke();
-        gc.restore();
+        // Second thinner pass for brightness
+        gc.strokeStyle = "rgba(255,255,200,0.5)";
+        gc.lineWidth = 0.8;
+        gc.stroke();
       }
 
       // ─── PARTICLES ───
@@ -2331,23 +2364,22 @@
             particles.splice(i, 1);
             continue;
           }
-          gc.save();
           gc.globalAlpha = p.life;
           gc.fillStyle = p.color;
-          gc.shadowColor = p.color;
-          gc.shadowBlur = 10;
           if (p.square) {
+            gc.save();
             gc.translate(p.x, p.y);
             gc.rotate(p.rot || 0);
             if (p.rs) p.rot += p.rs;
             gc.fillRect(-p.r, -p.r, p.r * 2, p.r * 2);
+            gc.restore();
           } else {
             gc.beginPath();
             gc.arc(p.x, p.y, p.r, 0, Math.PI * 2);
             gc.fill();
           }
-          gc.restore();
         }
+        gc.globalAlpha = 1;
       }
 
       // ─── DEATH ───
@@ -2472,19 +2504,21 @@
         gc.clearRect(0, 0, W, H);
         drawGameBg();
 
-        // Floor glow
+        // Floor glow — cheap layered lines, no shadowBlur
         gc.fillStyle = "rgba(13,89,242,0.12)";
         gc.fillRect(0, FLOOR_Y, W, H - FLOOR_Y);
-        gc.save();
-        gc.strokeStyle = "#00f2ff";
-        gc.lineWidth = 2;
-        gc.shadowColor = "#00f2ff";
-        gc.shadowBlur = 12;
+        gc.strokeStyle = "rgba(0,242,255,0.15)";
+        gc.lineWidth = 6;
         gc.beginPath();
         gc.moveTo(0, FLOOR_Y);
         gc.lineTo(W, FLOOR_Y);
         gc.stroke();
-        gc.restore();
+        gc.strokeStyle = "#00f2ff";
+        gc.lineWidth = 2;
+        gc.beginPath();
+        gc.moveTo(0, FLOOR_Y);
+        gc.lineTo(W, FLOOR_Y);
+        gc.stroke();
 
         // Obstacles
         let dead = false;
@@ -2604,22 +2638,37 @@
           if (gState === "playing") goMenu();
         }
       });
-      document.getElementById("gameCanvas").addEventListener("click", (e) => {
-        e.stopPropagation();
-        jump();
-      });
-      document.getElementById("ctrlRetry").addEventListener("click", (e) => {
-        e.stopPropagation();
-        retryGame();
-      });
-      document.getElementById("ctrlMenu").addEventListener("click", (e) => {
-        e.stopPropagation();
-        goMenu();
-      });
+      // pointerdown fires instantly — no 300ms tap delay like click
+      document
+        .getElementById("gameCanvas")
+        .addEventListener("pointerdown", (e) => {
+          e.preventDefault();
+          jump();
+        });
+      document
+        .getElementById("ctrlRetry")
+        .addEventListener("pointerdown", (e) => {
+          e.preventDefault();
+          retryGame();
+        });
+      document
+        .getElementById("ctrlMenu")
+        .addEventListener("pointerdown", (e) => {
+          e.preventDefault();
+          goMenu();
+        });
       document
         .getElementById("deathRetry")
-        .addEventListener("click", retryGame);
-      document.getElementById("deathMenu").addEventListener("click", goMenu);
+        .addEventListener("pointerdown", (e) => {
+          e.preventDefault();
+          retryGame();
+        });
+      document
+        .getElementById("deathMenu")
+        .addEventListener("pointerdown", (e) => {
+          e.preventDefault();
+          goMenu();
+        });
 
       // ─── MENU BUTTONS ───
       document.getElementById("btnPlay").addEventListener("click", startGame);
