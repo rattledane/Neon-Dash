@@ -72,7 +72,7 @@
       #bgc {
         position: fixed;
         inset: 0;
-        z-index: 1;
+        z-index: 6;
         pointer-events: none;
       }
       /* SCANLINES */
@@ -968,6 +968,20 @@
           </div>
           <div class="hud-right">
             <div class="hud-pct"><span id="hudPct">0</span>m</div>
+            <div
+              id="djIndicator"
+              style="
+                font-family: &quot;Orbitron&quot;, monospace;
+                font-size: 0.6rem;
+                letter-spacing: 0.08em;
+                color: rgba(255, 0, 255, 0.9);
+                margin-top: 4px;
+                text-align: right;
+                transition: opacity 0.2s;
+              "
+            >
+              ⬆ DOUBLE JUMP READY
+            </div>
           </div>
         </div>
         <div class="hud-bar-wrap">
@@ -1617,9 +1631,11 @@
         rot: 0,
         alive: true,
         trail: [],
+        jumpsUsed: 0,
       };
       const GRAVITY = 0.62,
         JUMP = -14;
+      let doubleJumpCooldownUntil = 0; // timestamp ms
 
       // Camera
       let camX = 0,
@@ -1651,6 +1667,8 @@
         P.rot = 0;
         P.alive = true;
         P.trail = [];
+        P.jumpsUsed = 0;
+        doubleJumpCooldownUntil = 0;
         obstacles = [];
         coins3d = [];
         particles = [];
@@ -1665,18 +1683,16 @@
       function genObstacles(fromX, toX) {
         let x = fromX;
         while (x < toX) {
-          // Base gap starts wide (350-550px), shrinks slightly with distance but never below 280
           const diffFactor = Math.min(1, distance / 800);
-          const minGap = 350 - diffFactor * 70; // 350 → 280
-          const maxGap = 550 - diffFactor * 100; // 550 → 450
+          const minGap = 350 - diffFactor * 70;
+          const maxGap = 550 - diffFactor * 100;
           const gap = minGap + Math.random() * (maxGap - minGap);
 
           const r = Math.random();
-          // Max spike cluster grows with distance: 1 at start → up to 3 later
           const maxCluster = 1 + Math.floor(diffFactor * 2.5);
 
-          if (r < 0.5) {
-            // Single spike or small cluster — always separated
+          if (r < 0.35) {
+            // Floor spike(s)
             const cnt =
               1 +
               (diffFactor > 0.3
@@ -1688,20 +1704,49 @@
                 x: x + i * 46,
                 h: 36 + Math.random() * 20,
               });
-          } else if (r < 0.75) {
-            // Platform
-            const platH = 70 + Math.random() * 70;
+          } else if (r < 0.55) {
+            // Platform — increased range so more appear
+            const platH = 80 + Math.random() * 100;
             obstacles.push({
               type: "platform",
               x: x,
               y: platH,
-              w: 80 + Math.random() * 100,
+              w: 90 + Math.random() * 130,
               h: 18,
             });
+            // 30% chance of a second platform nearby
+            if (Math.random() < 0.3) {
+              const platH2 = 60 + Math.random() * 120;
+              obstacles.push({
+                type: "platform",
+                x: x + 180 + Math.random() * 120,
+                y: platH2,
+                w: 80 + Math.random() * 100,
+                h: 18,
+              });
+            }
+          } else if (r < 0.72) {
+            // Ceiling spike — hangs from top, only after a bit of play
+            const ceilH = 40 + Math.random() * 40;
+            // fromY is a fraction of FLOOR_Y (the play area height)
+            const ceilFromY = (0.05 + Math.random() * 0.25) * FLOOR_Y;
+            obstacles.push({
+              type: "ceilspike",
+              x: x,
+              h: ceilH,
+              fromY: ceilFromY,
+            });
+            // Sometimes pair with a floor spike for a squeeze gap
+            if (diffFactor > 0.3 && Math.random() < 0.45)
+              obstacles.push({
+                type: "spike",
+                x: x + 70 + Math.random() * 60,
+                h: 30 + Math.random() * 16,
+              });
           } else {
-            // Two spikes with a gap — only after some distance
+            // Two floor spikes with gap
             obstacles.push({ type: "spike", x: x, h: 40 + Math.random() * 16 });
-            if (diffFactor > 0.25)
+            if (diffFactor > 0.2)
               obstacles.push({
                 type: "spike",
                 x: x + 56,
@@ -1709,7 +1754,7 @@
               });
           }
 
-          // Coins: much more frequent (65% chance), sometimes a row of 3
+          // Coins: 65% chance, sometimes a row of 3
           if (Math.random() < 0.65) {
             const coinY = FLOOR_Y - 65 - Math.random() * 90;
             const coinCount = Math.random() < 0.35 ? 3 : 1;
@@ -1730,21 +1775,55 @@
 
       function jump() {
         if (!P.alive || gState !== "playing") return;
+        const now = performance.now();
+
         if (P.onGround) {
+          // Normal ground jump
           P.vy = JUMP;
           P.onGround = false;
+          P.jumpsUsed = 1;
+          spawnJumpParticles("#00f2ff");
+          playTrailSfx();
+        } else if (P.jumpsUsed < 2 && now >= doubleJumpCooldownUntil) {
+          // Double jump — slightly weaker
+          P.vy = JUMP * 0.88;
+          P.jumpsUsed = 2;
+          doubleJumpCooldownUntil = now + 3000;
+          spawnJumpParticles("#ff00ff");
+          // Double jump burst
+          for (let i = 0; i < 16; i++) {
+            const angle = ((Math.PI * 2) / 16) * i;
+            particles.push({
+              x: P.x + P.sz / 2,
+              y: P.y + P.sz / 2,
+              vx: Math.cos(angle) * 3.5,
+              vy: Math.sin(angle) * 3.5,
+              life: 1,
+              decay: 0.06,
+              r: 2 + Math.random() * 3,
+              color: "#ff00ff",
+              square: false,
+            });
+          }
           playSfx("jump");
-          for (let i = 0; i < 10; i++) particles.push(mkJumpParticle());
-          // Trail jump sound
-          if (shopData.activeTrail === "lightning") playSfx("lightning");
-          if (shopData.activeTrail === "star") playSfx("star");
-          if (shopData.activeTrail === "rainbow") playSfx("rainbow");
-          if (shopData.activeTrail === "dark") playSfx("dark");
-          if (shopData.activeTrail === "base") playSfx("base");
+          playTrailSfx();
         }
       }
 
-      function mkJumpParticle() {
+      function playTrailSfx() {
+        playSfx("jump");
+        if (shopData.activeTrail === "lightning") playSfx("lightning");
+        if (shopData.activeTrail === "star") playSfx("star");
+        if (shopData.activeTrail === "rainbow") playSfx("rainbow");
+        if (shopData.activeTrail === "dark") playSfx("dark");
+        if (shopData.activeTrail === "base") playSfx("base");
+      }
+
+      function spawnJumpParticles(color) {
+        for (let i = 0; i < 10; i++) particles.push(mkJumpParticle(color));
+      }
+
+      function mkJumpParticle(color = "#00f2ff") {
         return {
           x: P.x + P.sz / 2,
           y: P.y + P.sz,
@@ -1753,7 +1832,7 @@
           life: 1,
           decay: 0.055,
           r: 2 + Math.random() * 3,
-          color: "#00f2ff",
+          color,
           square: false,
         };
       }
@@ -1817,6 +1896,19 @@
           Math.floor(distance) + "m";
         const barPct = Math.min(100, (distance / 2000) * 100);
         document.getElementById("hudBar").style.width = barPct + "%";
+        // Double jump indicator
+        const djEl = document.getElementById("djIndicator");
+        const now = performance.now();
+        const remaining = doubleJumpCooldownUntil - now;
+        if (remaining > 0) {
+          const secs = (remaining / 1000).toFixed(1);
+          djEl.textContent = `⬆ DJ COOLDOWN ${secs}s`;
+          djEl.style.color = "rgba(255,100,100,0.7)";
+        } else {
+          djEl.textContent = "⬆ DOUBLE JUMP READY";
+          djEl.style.color =
+            P.jumpsUsed >= 2 ? "rgba(255,255,255,0.3)" : "rgba(255,0,255,0.9)";
+        }
       }
 
       // ─── DRAW HELPERS ───
@@ -1866,6 +1958,32 @@
         gc.moveTo(x - 20, y);
         gc.lineTo(x + 20, y);
         gc.lineTo(x, y - h);
+        gc.closePath();
+        gc.fill();
+      }
+      // Ceiling spike — hangs downward from y=0 (top of play area)
+      function drawCeilingSpike(x, fromY, h) {
+        gc.globalAlpha = 0.2;
+        gc.fillStyle = "#ff6600";
+        gc.beginPath();
+        gc.moveTo(x - 26, fromY);
+        gc.lineTo(x + 26, fromY);
+        gc.lineTo(x, fromY + h + 8);
+        gc.closePath();
+        gc.fill();
+        gc.globalAlpha = 0.1;
+        gc.beginPath();
+        gc.moveTo(x - 32, fromY);
+        gc.lineTo(x + 32, fromY);
+        gc.lineTo(x, fromY + h + 14);
+        gc.closePath();
+        gc.fill();
+        gc.globalAlpha = 1;
+        gc.fillStyle = "#ff6600";
+        gc.beginPath();
+        gc.moveTo(x - 20, fromY);
+        gc.lineTo(x + 20, fromY);
+        gc.lineTo(x, fromY + h);
         gc.closePath();
         gc.fill();
       }
@@ -2205,6 +2323,7 @@
           P.y = FLOOR_Y - P.sz;
           P.vy = 0;
           P.onGround = true;
+          P.jumpsUsed = 0;
         } else P.onGround = false;
 
         // Platform check
@@ -2222,6 +2341,7 @@
             P.y = platY - P.sz;
             P.vy = 0;
             P.onGround = true;
+            P.jumpsUsed = 0;
           }
         }
 
@@ -2240,6 +2360,16 @@
         // Collision & draw
         gc.clearRect(0, 0, W, H);
         drawGameBg();
+
+        // Ceiling glow edge — subtle orange line to signal ceiling spike zone
+        gc.fillStyle = "rgba(255,80,0,0.05)";
+        gc.fillRect(0, 0, W, FLOOR_Y * 0.35);
+        gc.strokeStyle = "rgba(255,80,0,0.20)";
+        gc.lineWidth = 3;
+        gc.beginPath();
+        gc.moveTo(0, 0);
+        gc.lineTo(W, 0);
+        gc.stroke();
 
         // Floor glow — cheap layered lines, no shadowBlur
         gc.fillStyle = "rgba(13,89,242,0.12)";
@@ -2269,6 +2399,16 @@
               sx - 16 < P.x + P.sz - 6 &&
               sx + 16 > P.x + 6 &&
               P.y + 6 + P.sz - 6 > FLOOR_Y - obs.h + 8
+            )
+              dead = true;
+          } else if (obs.type === "ceilspike") {
+            drawCeilingSpike(sx, obs.fromY, obs.h);
+            // Collision: player top hits spike tip
+            if (
+              P.alive &&
+              sx - 16 < P.x + P.sz - 6 &&
+              sx + 16 > P.x + 6 &&
+              P.y < obs.fromY + obs.h - 8
             )
               dead = true;
           } else if (obs.type === "platform") {
