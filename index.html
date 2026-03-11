@@ -72,7 +72,7 @@
       #bgc {
         position: fixed;
         inset: 0;
-        z-index: 6;
+        z-index: 1;
         pointer-events: none;
       }
       /* SCANLINES */
@@ -1027,6 +1027,7 @@
     </div>
 
     <script>
+      let gState = "menu"; // declared early — bgLoop runs before game init
       // ═══════════════════════════════════════════════════════════════════
       //  AUDIO ENGINE (Web Audio API — no external files needed)
       // ═══════════════════════════════════════════════════════════════════
@@ -1283,8 +1284,7 @@
       });
 
       // Draw cursor effects on bg canvas every frame
-      function drawCursorFx() {
-        // Cursor rects
+      function drawCursorFx(ctx) {
         for (let i = curRects.length - 1; i >= 0; i--) {
           const r = curRects[i];
           r.life -= r.decay;
@@ -1293,16 +1293,15 @@
             curRects.splice(i, 1);
             continue;
           }
-          bgCtx.save();
-          bgCtx.translate(r.x, r.y);
-          bgCtx.rotate(r.rot);
-          bgCtx.globalAlpha = r.life * r.bri;
-          bgCtx.strokeStyle = `rgb(${r.rgb.join(",")})`;
-          bgCtx.lineWidth = 1;
-          bgCtx.strokeRect(-r.sz / 2, -r.sz / 2, r.sz, r.sz);
-          bgCtx.restore();
+          ctx.save();
+          ctx.translate(r.x, r.y);
+          ctx.rotate(r.rot);
+          ctx.globalAlpha = r.life * r.bri;
+          ctx.strokeStyle = `rgb(${r.rgb.join(",")})`;
+          ctx.lineWidth = 1;
+          ctx.strokeRect(-r.sz / 2, -r.sz / 2, r.sz, r.sz);
+          ctx.restore();
         }
-        // Click waves
         for (let i = clickWaves.length - 1; i >= 0; i--) {
           const w = clickWaves[i];
           w.r += (w.maxR - w.r) * 0.18;
@@ -1311,14 +1310,14 @@
             clickWaves.splice(i, 1);
             continue;
           }
-          bgCtx.globalAlpha = w.life * 0.6;
-          bgCtx.strokeStyle = `rgb(${w.col.join(",")})`;
-          bgCtx.lineWidth = 1.5;
-          bgCtx.beginPath();
-          bgCtx.arc(w.x, w.y, w.r, 0, Math.PI * 2);
-          bgCtx.stroke();
+          ctx.globalAlpha = w.life * 0.6;
+          ctx.strokeStyle = `rgb(${w.col.join(",")})`;
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          ctx.arc(w.x, w.y, w.r, 0, Math.PI * 2);
+          ctx.stroke();
         }
-        bgCtx.globalAlpha = 1;
+        ctx.globalAlpha = 1;
       }
 
       // ═══════════════════════════════════════════════════════════════════
@@ -1400,7 +1399,7 @@
           bgCtx.fillStyle = `rgba(${d.h},${d.a})`;
           bgCtx.fill();
         }
-        drawCursorFx();
+        if (gState !== "playing") drawCursorFx(bgCtx);
         requestAnimationFrame(bgLoop);
       }
       bgLoop();
@@ -1612,7 +1611,7 @@
       window.addEventListener("resize", resizeGame);
 
       // Game state
-      let gState = "menu"; // menu | playing | dead
+      // Game state: menu | playing | dead
       let attempts = 1;
       let raf = null;
 
@@ -1633,14 +1632,14 @@
         trail: [],
         jumpsUsed: 0,
       };
-      const GRAVITY = 0.62,
-        JUMP = -14;
+      const GRAVITY = 1.0,
+        JUMP = -17.5;
       let doubleJumpCooldownUntil = 0; // timestamp ms
 
       // Camera
       let camX = 0,
         bgScrollX = 0;
-      const SPEED_BASE = 5;
+      const SPEED_BASE = 8;
       let speed = SPEED_BASE;
 
       // Obstacles & coins
@@ -1786,7 +1785,7 @@
           playTrailSfx();
         } else if (P.jumpsUsed < 2 && now >= doubleJumpCooldownUntil) {
           // Double jump — slightly weaker
-          P.vy = JUMP * 0.88;
+          P.vy = JUMP * 0.92;
           P.jumpsUsed = 2;
           doubleJumpCooldownUntil = now + 3000;
           spawnJumpParticles("#ff00ff");
@@ -2305,7 +2304,7 @@
         raf = requestAnimationFrame(gameLoop);
 
         // Difficulty ramp
-        speed = SPEED_BASE + Math.min(4, score / 800);
+        speed = SPEED_BASE + Math.min(5, score / 400);
         rainbowHue = (rainbowHue + 2) % 360;
         camX += speed;
         bgScrollX += speed * 0.5;
@@ -2462,6 +2461,7 @@
         }
         drawPlayer();
         drawParticles();
+        drawCursorFx(gc);
         updateHUD();
 
         if (dead && P.alive) killPlayer();
